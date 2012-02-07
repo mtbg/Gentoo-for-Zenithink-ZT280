@@ -7,7 +7,7 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 
-#define ROOT_DEVICE "sdb"
+#define ROOT_DEVICE "cardblksd2"
 #define ROOT_FS_TYPE "ext3"
 #define INIT_NAME "/sbin/init"
 
