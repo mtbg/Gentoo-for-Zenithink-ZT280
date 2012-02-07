@@ -1,0 +1,49 @@
+To run Gentoo on you Zenithink ZT-280 tablet:
+
+- put your SD(HC) memory card into a memory card reader connected to your PC,
+- make a proper partition table:
+ 
+ # fdisk /dev/sdb
+  > o
+  > n
+    p
+    1
+    [enter]
+    +16M
+  > n
+    p
+    2
+    [enter]
+    [enter]
+  > t
+    1
+    b
+  > w
+
+- prepare filesystems on the partitions:
+
+  # mkfs.vfat /dev/sdb1
+  # mke2fs -j -T small /dev/sdb2
+
+- mount the first partition, make zt-debug directory and copy the kernel image:
+
+  # mount -t vfat /dev/sdb1 /mnt
+  # mkdir /mnt/zt-debug
+  # cp ZT280.kernel /mnt/zt-debug/
+  # umount /mnt
+
+  (kernel image filename is important!)
+
+- mount the second partition and unpack stage3 tarball on it:
+
+  # mount -t ext3 /dev/sdb2 /mnt
+  # tar xvjpf stage3-ZT280.tar.bz2 -C /mnt
+  (...)
+  # umount /mnt
+ 
+Place the memory card in your tablet's slot, press the power button and, when "ZEPAD" logo appears, immediately press MENU key (it is for Z102, other models like C91 may need different key combinations, so try it yourself). The bootloader will notify you about the kernel image and ask if it should be loaded. Press the BACK key to confirm.
+
+The system can be accessed remotely - just connect an Ethernet cable from your network to the RJ45 socket. SSHD is running by default and IP is configured via DHCP.
+
+Login using username 'root' and password 'root'.
+
