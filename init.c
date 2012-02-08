@@ -7,6 +7,13 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 
+struct linux_dirent {
+	unsigned long d_ino;
+	unsigned long d_off;
+	unsigned short d_reclen;
+	char d_name[];
+};
+
 #define ROOT_DEVICE "cardblksd2"
 #define ROOT_FS_TYPE "ext3"
 #define INIT_NAME "/sbin/init"
@@ -38,8 +45,8 @@ __syscall int s_write(int fd, const void *buf, int l);
 __syscall int s_read(int fd, void *buf, int l);
 __syscall int s_execve(const char *path, char *const argv[], char *const envp[]);
 __syscall int s_mount(const char *dev, const char *path, const char *filesystem, int flags, const void *data);
-__syscall int s_umount(const char *path);
-__syscall int s_getdents(int fd, struct dirent *d, int count);
+__syscall int s_umount2(const char *path, int flags);
+__syscall int s_getdents(int fd, struct linux_dirent *d, int count);
 __syscall int s_setpriority(int which, int who, int prior);
 __syscall int s_open(const char *path, int flags);
 __syscall int s_close(int fd);
@@ -49,17 +56,21 @@ __syscall int s_pause(void);
 int s_usleep(int usec);
 __syscall int s_nanosleep(struct timespec *req, struct timespec *rem);
 __init void _start(void);
+int _start_prog(int argc, char **arg);
 
 
-int main(int argc, char *const argv[], char *const envp[]) {
+int main(int argc, char **argv, char **envp) {
+	char name[] = INIT_NAME;
 	prepare();
+	if(argc>0) argv[0] = name;
 	s_execve(INIT_NAME, argv, envp);
+	return 0;
 }
 
 void prepare(void) {
 	char name[256];
 	char dirents[16384];
-	struct dirent *d;
+	struct linux_dirent *d;
 	int pid;
 	int fd;
 	int maj;
@@ -90,15 +101,17 @@ void prepare(void) {
 	   print("Warning: Unable to open /proc\n");
 	}
 	
-	d = (struct dirent*) &dirents[0];
+	d = (struct linux_dirent*) &dirents[0];
 	n = s_getdents(fd, d, sizeof(dirents));
-
+	
 	if(fd>=0) s_close(fd);
 	
 	pid = 0;
 	for(i=0; i<n; i+=d->d_reclen) {
-	   d = (struct dirent*) &dirents[i];
-	   if(d->d_type==DT_DIR || d->d_type==DT_UNKNOWN) {
+	   char d_type;
+	   d = (struct linux_dirent*) &dirents[i];
+	   d_type = *(((char*) d) + d->d_reclen - 1);
+	   if(d_type==DT_DIR || d_type==DT_UNKNOWN) {
 	      if(isdecnum(d->d_name)) {
 	         getprocname(d->d_name, name, sizeof(name));
 		 if(name[0]==0) continue;
@@ -112,12 +125,12 @@ void prepare(void) {
 
 	if(pid) {
 	   print("* Applying workaround for adc_keypad (set nice to 20)\n");
-	   n = s_setpriority(pid, PRIO_PROCESS, 20);
+	   n = s_setpriority(PRIO_PROCESS, pid, 20);
 	   if(n<0) {
 	      print("Warning: Unable to change the priority\n");
 	   }
 	}
-
+	
 	print("* Waiting for root device\n");
 	name[0] = 0;
 	strappend(name, "/sys/class/block/");
@@ -158,7 +171,6 @@ void prepare(void) {
 	   name[0] = 0;
 	   strappend(name, "/dev/");
 	   strappend(name, ROOT_DEVICE);
-	   print(name);
 	   i = s_mknod(name, S_IFBLK | 0660, maj<<8 | min);
 	   if(i<0) {
 	      print("Error: Unable to create root device node\n");
@@ -170,16 +182,16 @@ void prepare(void) {
 	}
 	
 	print("* Mounting root filesystem on /real_root\n");
-	i = s_mount(name, "/real_root", ROOT_FS_TYPE, MS_RDONLY, "");
+	i = s_mount(name, "/real_root", ROOT_FS_TYPE, MS_RDONLY, NULL);
 	if(i<0) {
 	   print("Error: Unable to mount root filesystem\n");
 	   s_pause();
 	}
 
 	print("* Unmounting filesystems\n");
-	s_umount("/sys");
-	s_umount("/proc");
-	s_umount("/dev");
+	s_umount2("/sys", 0);
+	s_umount2("/proc", 0);
+	s_umount2("/dev", 0);
 
 	print("* Changing root directory to /real_root\n");
 	i = s_chroot("/real_root");
@@ -192,6 +204,7 @@ void prepare(void) {
 }
 
 int isdecnum(const char *t) {
+	if(*t==0) return 0;
 	while(*t) {
 	   if(*t<'0' || *t>'9') return 0;
 	   t++;
@@ -200,16 +213,15 @@ int isdecnum(const char *t) {
 }
 
 int dectoint(const char *t) {
-	//int a;
-	//int r;
-	//r = 0;
-	/*while(*t) {
-	   //if((*t)<'0' || (*t)>'9') return -1;
-	   //r *= 10;
-	   //r += (*t) - '0';
+	int r;
+	r = 0;
+	while(*t) {
+	   if((*t)<'0' || (*t)>'9') return -1;
+	   r *= 10;
+	   r += (*t) - '0';
 	   t++;
-	}*/
-	return 1;
+	}
+	return r;
 }
 
 void getprocname(const char *id, char *name, int len) {
@@ -298,7 +310,7 @@ int s_mount(const char *dev, const char *path, const char *filesystem, int flags
 	__SYSCALL(SYS_mount, "push {r4}\nldr r4, [sp, #4]\n", "pop {r4}\n");
 }
 
-int s_getdents(int fd, struct dirent *d, int count) {
+int s_getdents(int fd, struct linux_dirent *d, int count) {
 	_SYSCALL(SYS_getdents);
 }
 
@@ -326,7 +338,7 @@ int  s_pause(void) {
 	_SYSCALL(SYS_pause);
 }
 
-int s_umount(const char *path) {
+int s_umount2(const char *path, int flags) {
 	_SYSCALL(SYS_umount2);
 }
 
@@ -343,9 +355,21 @@ int s_nanosleep(struct timespec *req, struct timespec *rem) {
 
 void _start(void) {
 	asm volatile ( 	"mov fp, #0\n"
-			"mov lr, #0\n"
-			"b main\n"
+			"ldr r0, [sp, #0]\n"
+			"add r1, sp, #4\n"
+			"mov lr, pc\n"
+			"b _start_prog\n"
 			"mov r7, #" _SYSCALL_TEXTNUM(SYS_exit) "\n"
 			"svc 0\n");
+}
+
+int _start_prog(int argc, char **arg) {
+	char **argv;
+	char **envp;
+
+	argv = arg;
+	envp = &arg[argc+1];
+
+	return main(argc, argv, envp);
 }
 
