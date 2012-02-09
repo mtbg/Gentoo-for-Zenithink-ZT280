@@ -143,7 +143,10 @@ void prepare(void) {
 	   if(fd>0) break;
 	   s_usleep(100000);
 	}
-	if(fd>=0) n = s_read(fd, name, sizeof(name));
+	if(fd>=0) {
+	   n = s_read(fd, name, sizeof(name));
+	   s_close(fd);
+	}
 	
 	maj = -1;
 	if(n>0) {
@@ -241,6 +244,8 @@ void getprocname(const char *id, char *name, int len) {
 	if(fd<0) return;
 
 	n = s_read(fd, buf, sizeof(buf));
+	s_close(fd);
+
 	if(n<=0) return;
 	buf[n] = 0;
 
